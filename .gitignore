@@ -32,4 +32,5 @@ codegen/
 octave-workspace
 
 # folders
-subject1/
+subject*/
+Calibratie*/
