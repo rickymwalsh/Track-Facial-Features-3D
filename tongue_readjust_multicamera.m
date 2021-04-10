@@ -3,6 +3,8 @@ clc; close all; clear variables;
 
 filenames = ['subject1/proefpersoon 1.1_M.avi'; 'subject1/proefpersoon 1.1_R.avi';
                     'subject1/proefpersoon 1.1_L.avi'];
+% Load the pairs of extrinsic parameter matrices.
+load("stereoParamsLM.mat"); load("stereoParamsRM.mat");
     
 videoReader_M = VideoReader(filenames(1,:));
 videoPlayer_M = vision.VideoPlayer();
@@ -16,40 +18,90 @@ videoReader_L = VideoReader(filenames(3,:));
 videoPlayer_L = vision.VideoPlayer();
 objectFrame_L = read(videoReader_L, 250);
 
+%% Get the facial landmarks to create a coordinate system.
+
+figure; imshow(objectFrame_M); title('Select Points for Left Eye');
+[xi, yi] = getpts();            % Select points for the outer edge of left eye.
+facePoints_M = [xi yi];
+loc = repmat("Left Eye", size(xi)); % Vector to track which region the points correspond to.
+
+figure; imshow(objectFrame_M); title('Select Points for Right Eye');
+[xi, yi] = getpts();            % Select points for the outer edge of right eye.
+facePoints_M = [facePoints_M; xi yi];   % Append the new points.
+loc = [loc; repmat("Right Eye", size(xi))];   % Append the new region.       
+
+figure; imshow(objectFrame_M); title('Select Points for Nose Tip');
+[xi, yi] = getpts();            % Select points for the outer edge of nose tip.
+facePoints_M = [facePoints_M; xi yi];   % Append the new points.
+loc = [loc; repmat("Nose", size(xi))];        % Append the new region.
+
+% Create the point tracker for each camera (possible to track different points in L and R)
+faceTracker_L = vision.PointTracker('MaxBidirectionalError', 1, 'NumPyramidLevels', 5);
+faceTracker_R = vision.PointTracker('MaxBidirectionalError', 1, 'NumPyramidLevels', 5);
+faceTracker_M = vision.PointTracker('MaxBidirectionalError', 1, ...
+                        'NumPyramidLevels', 2); % Less likely to change position => 
+                                            % lower pyramid levels to save some computation.
+
+% Initialize the point trackers
+initialize(faceTracker_L, facePoints_M, objectFrame_M);
+initialize(faceTracker_R, facePoints_M, objectFrame_M);
+initialize(faceTracker_M, facePoints_M, objectFrame_M);
+
+% Find the points in the L and R camera frames.
+[facePoints_L, validIdx_L] = step(faceTracker_L, objectFrame_L);
+[facePoints_R, validIdx_R] = step(faceTracker_R, objectFrame_R);
+% Extract the valid matches.
+facePoints_M = facePoints_M(validIdx_L & validIdx_R, :);
+facePoints_L = facePoints_L(validIdx_L & validIdx_R, :);
+facePoints_R = facePoints_R(validIdx_R & validIdx_L, :);
+
+% Get the point indexes for Left Eye, Right Eye, etc. for the Left and Right cameras.
+le_id = (loc(validIdx_L&validIdx_R)=="Left Eye");    
+re_id = (loc(validIdx_L & validIdx_R)=="Right Eye");   
+n_id  = (loc(validIdx_L &validIdx_R)=="Nose");       
+
+newFacePts = translate_coords(facePoints_M, facePoints_L, ...
+        stereoParamsLM, facePoints_M(le_id,:), facePoints_L(le_id,:),...
+        facePoints_M(re_id,:), facePoints_L(re_id,:), [0 0], [0 0], [0 0 0], false);
+    
+% Save original nose position to compare to subsequent facial coordinate systems.
+if size(newFacePts(n_id,:),1) > 1
+   orig_nose = median(newFacePts(n_id,:));
+else, orig_nose = newFacePts(n_id,:);
+end
+
 %% Get the initial points to track in the middle camera.
 
-figure; imshow(objectFrame_M);
+figure; imshow(objectFrame_M); title('Draw rectangle around tongue tip');
 objectRegion_M=round(getPosition(imrect));   % User selects the rectangle of interest.
-%width = objectRegion_M[3];
-%height = objectRegion_M[4];
 
-points_M = detectMinEigenFeatures(im2gray(objectFrame_M),'ROI',objectRegion_M,...
-                                    'MinQuality',0.001);
+tonguePoints_M = detectMinEigenFeatures(im2gray(objectFrame_M),'ROI',objectRegion_M,...
+                                    'MinQuality',0.001); % Reduce Quality to get more pts.
 
 % Initialise point tracker for the middle camera - position should not
 % change too much from frame to frame => PyramidLevels to reduce computation time.
-tracker_M = vision.PointTracker('MaxBidirectionalError',1,'NumPyramidLevels',2);
-points_M = points_M.Location;
+tracker_M = vision.PointTracker('MaxBidirectionalError',1, 'NumPyramidLevels',3);
+tonguePoints_M = tonguePoints_M.Location;
 
-% Initialize the tracker with the initial point locations and the initial
-initialize(tracker_M,points_M,objectFrame_M);
+% Initialize the tracker with the initial point locations.
+initialize(tracker_M, tonguePoints_M, objectFrame_M);
 
-oldPoints = points_M;
+oldPoints = tonguePoints_M;
+
 %% Play video.
 videoPlayer  = vision.VideoPlayer('Position',...
     [100 100 [size(objectFrame_M, 2), size(objectFrame_M, 1)]+30]);
 
-% Load the pairs of extrinsic parameter matrices.
-load("stereoParamsLM.mat"); load("stereoParamsRM.mat");
-
 % Trackers for tracking from middle to left & right cameras. Allow higher
 % pyramid levels since position can be shifted more.
-tracker_R = vision.PointTracker('MaxBidirectionalError',2.5,'NumPyramidLevels',6);
-tracker_L = vision.PointTracker('MaxBidirectionalError',2.5,'NumPyramidLevels',6);
+tracker_R = vision.PointTracker('MaxBidirectionalError',2,'NumPyramidLevels',5);
+tracker_L = vision.PointTracker('MaxBidirectionalError',2,'NumPyramidLevels',5);
 
 figure(); hold on;   % Create a figure to hold the world coordinates plots.
 title('Y vs. X world coordinates of tracked tongue points');
 xlabel('X'); ylabel('Y');
+
+saved_pts_L=[]; saved_pts_R=[];             % Arrays to hold the tongue points.
 
 while hasFrame(videoReader_M)
           
@@ -59,45 +111,31 @@ while hasFrame(videoReader_M)
     visiblePoints = points_M(isFound, :);
     oldInliers = oldPoints(isFound, :);
 
-    if size(visiblePoints, 1) <= 10
-        m1 =visiblePoints(:,1);
-        m2 =visiblePoints(:,2);
-
-        mediaX = round(median(m1));
-        mediaY = round(median(m2));
-        objectRegion_M(1) = mediaX - 27;
-        objectRegion_M(2) = mediaY - 27;
+    if size(visiblePoints, 1) <= 10     % Recapture interest points if they drop below 10.
+        objectRegion_M(1:2) = round(median(visiblePoints)) - [27 27];
+        
         points_M = detectMinEigenFeatures(im2gray(frame_M),'ROI',objectRegion_M,...
                                    'MinQuality',0.001);
 
-        tracker_M = vision.PointTracker('MaxBidirectionalError',1,'NumPyramidLevels',2);
-        points_M = points_M.Location;
-
-        initialize(tracker_M,points_M,frame_M);
-        [points_M, isFound] = step(tracker_M, frame_M);
-
-        visiblePoints = points_M(isFound, :);
-
-        oldInliers = visiblePoints;
-        %pause(4);
+        setPoints(tracker_M, points_M.Location);  
+        visiblePoints = points_M.Location;
+    else
+        % Estimate the geometric transformation between the old points
+        % and the new points and eliminate outliers
+        [xform, inlierIdx] = estimateGeometricTransform2D(...
+                        oldInliers, visiblePoints, 'similarity', 'MaxDistance', 4);
+        oldInliers    = oldInliers(inlierIdx, :);
+        visiblePoints = visiblePoints(inlierIdx, :);
     end
 
-    % Estimate the geometric transformation between the old points
-    % and the new points and eliminate outliers
-    [xform, inlierIdx] = estimateGeometricTransform2D(...
-    oldInliers, visiblePoints, 'similarity', 'MaxDistance', 4);
-    oldInliers    = oldInliers(inlierIdx, :);
-    visiblePoints = visiblePoints(inlierIdx, :);
-
     % Display tracked points
-    frame_M = insertMarker(frame_M, visiblePoints, '+', ...
-                    'Color', 'white');
+    frame_M = insertMarker(frame_M, visiblePoints, '+', 'Color', 'white');
 
     % Track the points from the middle camera to the right camera.
     release(tracker_R);
     initialize(tracker_R, visiblePoints, frame_M);
     frame_R = readFrame(videoReader_R);
-    [points_R,validity_R] = tracker_R(frame_R);
+    [points_R,validIdx_tongue_R] = tracker_R(frame_R);
 %     out_R = insertMarker(frame_R,points_R(validity_R, :),'+');
 %     videoPlayer_R(out_R);
 
@@ -105,19 +143,42 @@ while hasFrame(videoReader_M)
     release(tracker_L);
     initialize(tracker_L, visiblePoints, frame_M);
     frame_L = readFrame(videoReader_L);
-    [points_L,validity_L] = tracker_L(frame_L);
+    [points_L,validIdx_tongue_L] = tracker_L(frame_L);
     
-    world_pts_M_L = triangulate(visiblePoints(validity_L,:), points_L(validity_L, :),...
-                            stereoParamsLM);
-    world_pts_M_R = triangulate(visiblePoints(validity_R,:), points_R(validity_R, :),...
-                            stereoParamsRM);
-
-    scatter(world_pts_M_L(:,1), -world_pts_M_L(:,2),16,'blue','filled')      
-    scatter(world_pts_M_R(:,1), -world_pts_M_R(:,2),16, 'red','filled')    
-
+    % Track the facial landmarks.
+    [facePts_L, validIdx_L] = step(faceTracker_L, frame_L);
+    [facePts_R, validIdx_R] = step(faceTracker_R, frame_R);
+    [facePts_M, validIdx_M] = step(faceTracker_M, frame_M);
+    validIdx_face = (validIdx_L & validIdx_M & validIdx_R);
+    % Get the point indexes for Left Eye, Right Eye, etc. for the Left and Right cameras.
+    le_id = (loc(validIdx_face)=="Left Eye");    
+    re_id = (loc(validIdx_face)=="Right Eye");   
+    n_id  = (loc(validIdx_face)=="Nose");   
+    
+    if sum(validIdx_tongue_L) > 0    
+        tongue_pts_L = translate_coords( visiblePoints(validIdx_tongue_L,:), ...
+            points_L(validIdx_tongue_L, :), stereoParamsLM, facePoints_M(le_id,:),...
+            facePoints_L(le_id,:), facePoints_M(re_id,:),facePoints_L(re_id,:), ...
+            facePoints_M(n_id,:), facePoints_L(n_id,:), [0 0 0], false);
+        % Plot the X, Y coordinates of the points.
+        scatter(tongue_pts_L(:,1), tongue_pts_L(:,2),16,'blue','filled')      
+        saved_pts_L = [saved_pts_L; tongue_pts_L]; % Keep a record of past points.
+    end
+    
+    if sum(validIdx_tongue_R) > 0
+        tongue_pts_R = translate_coords( visiblePoints(validIdx_tongue_R,:), ...
+            points_R(validIdx_tongue_R, :), stereoParamsRM, facePoints_M(le_id,:),...
+            facePoints_R(le_id,:), facePoints_M(re_id,:),facePoints_R(re_id,:), ...
+            facePoints_M(n_id,:), facePoints_R(n_id,:), [0 0 0], false);
+        % Plot the X, Y coordinates of the points.
+        scatter(tongue_pts_R(:,1), tongue_pts_R(:,2),16,'red','filled')      
+        saved_pts_R = [saved_pts_R; tongue_pts_R]; % Keep a record of past points.
+    end
     % Reset the points
     oldPoints = visiblePoints;
     setPoints(tracker_M, oldPoints);  
     % Display the annotated video frame using the video player object
     step(videoPlayer, frame_M);
 end
+
+release(videoPlayer);

@@ -2,7 +2,7 @@
 function [new_pts] = ...
         translate_coords(pts1, pts2, stereoParams, left_eye_pts1, left_eye_pts2, ...
                             right_eye_pts1, right_eye_pts2, nose_tip_pts1, nose_tip_pts2,...
-                            original_nose_tip)
+                            original_nose_tip, check_rotation)
 % Function to get the regular world coordinates of selected points from two
 % cameras and translate them into the reference coordinate system in
 % relation to the facial landmarks.
@@ -14,6 +14,7 @@ function [new_pts] = ...
 %   nose_tip_pts1 (&2)    Points at the tip of the nose from cams 1 (& 2).
 %   original_nose_tip     The original point of the nose tip in the original 
 %                         facial coordinate system.
+%   check_rotation        true or false. Whether to check for rotation vs. original.
 % Returns:
 %   new_pts     The points defined by pts1 and pts2, expressed in the world
 %               coordinate system relative to the facial landmarks.
@@ -48,7 +49,7 @@ function [new_pts] = ...
     x0(3) = 0;    % Disregarding the Z-direction when getting this axis for simplicity.
     % The new X coordinates for each point will be the dot product with the unit vector
     % pointing along the X-axis (ignoring Z contribution), after shifting by the x-origin.
-    new_pts(:,1) = (x0 - [pts_world(:,1:2) zeros(length(pts_world),1)]) * x_vec';    
+    new_pts(:,1) = ([pts_world(:,1:2) zeros(size(pts_world,1),1)] - x0) * x_vec';    
     % The line between the left & right eye defines the X-axis. The
     % distance to this line (ignoring Z coordinates) gives the new Y coordinates.
     new_pts(:,2) = -point_to_line_2D(pts_world, left_eye, right_eye); 
@@ -61,18 +62,19 @@ function [new_pts] = ...
     RU = @(A,B) eye(3) + ssc(cross(A,B)) + ...
      ssc(cross(A,B))^2*(1-dot(A,B))/(norm(cross(A,B))^2); % Function to get rotation matrix.
  
-    % Get the nose_tip coordinates relative to the coordinate system above.
-    new_nose(1) = dot(x0 - [nose_tip(1:2) 0], x_vec);
-    new_nose(2) = -point_to_line_2D(nose_tip, left_eye, right_eye); 
-    new_nose(3) = z0 - nose_tip(3);
-    % Check if it is a different location to the original nose tip. If so,
-    % get the rotation matrix and apply it to the detected tongue points.
-    if norm(new_nose(2:3) - original_nose_tip(2:3))> 0.001
-%         (new_nose(2) ~= original_nose_tip(2)) || (new_nose(3) ~= original_nose_tip(3)) 
-        R=RU([0 original_nose_tip(2) original_nose_tip(3)], [0 new_nose(2) new_nose(3)]);
-        R = R/norm(R);   % Normalise the matrix.
-        R(1) = 1;        % Rotation about x-axis => preserve x coordinates.
-        new_pts = new_pts * R;          % Apply the same rotation to the new points.
+    if check_rotation
+        % Get the nose_tip coordinates relative to the coordinate system above.
+        new_nose(1) = dot(x0 - [nose_tip(1:2) 0], x_vec);
+        new_nose(2) = -point_to_line_2D(nose_tip, left_eye, right_eye); 
+        new_nose(3) = z0 - nose_tip(3);
+        % Check if it is a different location to the original nose tip. If so,
+        % get the rotation matrix and apply it to the detected tongue points.
+        if  (norm(new_nose(2:3) - original_nose_tip(2:3))> 0.001)
+            R=RU([0 original_nose_tip(2) original_nose_tip(3)], [0 new_nose(2) new_nose(3)]);
+            R = R/norm(R);   % Normalise the matrix.
+            R(1) = 1;        % Rotation about x-axis => preserve x coordinates.
+            new_pts = new_pts * R;          % Apply the same rotation to the new points.
+        end
     end
 end                                                          
                                 
