@@ -1,6 +1,4 @@
 
-% ** Not working yet **
-
 function [new_pts] = ...
         translate_coords(pts1, pts2, stereoParams, left_eye_pts1, left_eye_pts2, ...
                             right_eye_pts1, right_eye_pts2, nose_tip_pts1, nose_tip_pts2,...
@@ -8,6 +6,17 @@ function [new_pts] = ...
 % Function to get the regular world coordinates of selected points from two
 % cameras and translate them into the reference coordinate system in
 % relation to the facial landmarks.
+% Input:
+%   pts1, pts2      The points to be converted, one set each from one camera.   
+%   stereoParams    The relevant stereoParams for the two cameras (pts1 and pts2)
+%   left_eye_pts1 (& 2)   The points for the left eye (observer perspective) from cams 1 (& 2)
+%   right_eye_pts1 (&2)   Points for the right eye from cams 1 (& 2).
+%   nose_tip_pts1 (&2)    Points at the tip of the nose from cams 1 (& 2).
+%   original_nose_tip     The original point of the nose tip in the original 
+%                         facial coordinate system.
+% Returns:
+%   new_pts     The points defined by pts1 and pts2, expressed in the world
+%               coordinate system relative to the facial landmarks.
     
     % Get the world coordinates for the facial landmarks.
     left_eye_w = triangulate(left_eye_pts1, left_eye_pts2, stereoParams);                    
