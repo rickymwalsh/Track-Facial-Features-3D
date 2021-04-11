@@ -91,11 +91,11 @@ oldPoints = tonguePoints_M;
 %% Play video.
 videoPlayer  = vision.VideoPlayer('Position',...
     [100 100 [size(objectFrame_M, 2), size(objectFrame_M, 1)]+30]);
-
+v2=vision.VideoPlayer(); v3 = vision.VideoPlayer();
 % Trackers for tracking from middle to left & right cameras. Allow higher
 % pyramid levels since position can be shifted more.
-tracker_R = vision.PointTracker('MaxBidirectionalError',2,'NumPyramidLevels',5);
-tracker_L = vision.PointTracker('MaxBidirectionalError',2,'NumPyramidLevels',5);
+tracker_R = vision.PointTracker('MaxBidirectionalError',2,'NumPyramidLevels',6);
+tracker_L = vision.PointTracker('MaxBidirectionalError',2,'NumPyramidLevels',6);
 
 figure(); hold on;   % Create a figure to hold the world coordinates plots.
 title('Y vs. X world coordinates of tracked tongue points');
@@ -146,14 +146,16 @@ while hasFrame(videoReader_M)
     initialize(tracker_R, visiblePoints, frame_M);
     frame_R = readFrame(videoReader_R);
     [points_R,validIdx_tongue_R] = tracker_R(frame_R);
-%     out_R = insertMarker(frame_R,points_R(validity_R, :),'+');
-%     videoPlayer_R(out_R);
+    out_R = insertMarker(frame_R,points_R(validIdx_tongue_R, :),'+');
+    step(v2, out_R);
 
     % Track the points from the middle camera to the left camera.
     release(tracker_L);
     initialize(tracker_L, visiblePoints, frame_M);
     frame_L = readFrame(videoReader_L);
     [points_L,validIdx_tongue_L] = tracker_L(frame_L);
+    out_L = insertMarker(frame_L,points_L(validIdx_tongue_L, :),'+');
+    step(v3, out_L);
     
     % Track the facial landmarks.
     [facePts_L, validIdx_L] = step(faceTracker_L, frame_L);
@@ -166,6 +168,7 @@ while hasFrame(videoReader_M)
     
     % Check that there is at least one point for the tongue and facial landmarks.
     if min([max(le_id), max(re_id), max(n_id), max(validIdx_tongue_L)]) > 0  
+        % Get the coordinates relative to the facial coordinate system.
         tongue_pts_L = translate_coords( visiblePoints(validIdx_tongue_L,:), ...
             points_L(validIdx_tongue_L, :), stereoParamsLM, facePts_M(le_id,:),...
             facePts_L(le_id,:), facePts_M(re_id,:),facePts_L(re_id,:), ...
@@ -183,6 +186,7 @@ while hasFrame(videoReader_M)
     
     % Check that there is at least one point for the tongue and facial landmarks.
     if min([max(le_id), max(re_id), max(n_id), max(validIdx_tongue_R)]) > 0  
+        % Get the coordinates relative to the facial coordinate system.
         tongue_pts_R = translate_coords( visiblePoints(validIdx_tongue_R,:), ...
             points_R(validIdx_tongue_R, :), stereoParamsRM, facePts_M(le_id,:),...
             facePts_R(le_id,:), facePts_M(re_id,:),facePts_R(re_id,:), ...
