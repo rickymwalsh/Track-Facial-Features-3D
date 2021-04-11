@@ -1,22 +1,22 @@
 %% Initialise, create video readers, players and initial frames.
 clc; close all; clear variables;
 
-filenames = ['subject1/proefpersoon 1.1_M.avi'; 'subject1/proefpersoon 1.1_R.avi';
-                    'subject1/proefpersoon 1.1_L.avi'];
+filenames = ['subject4/proefpersoon 4_M.avi'; 'subject4/proefpersoon 4_R.avi';
+                    'subject4/proefpersoon 4_L.avi'];
 % Load the pairs of extrinsic parameter matrices.
 load("stereoParamsLM.mat"); load("stereoParamsRM.mat");
     
 videoReader_M = VideoReader(filenames(1,:));
 videoPlayer_M = vision.VideoPlayer();
-objectFrame_M = read(videoReader_M, 250);
+objectFrame_M = read(videoReader_M, 350);
 
 videoReader_R = VideoReader(filenames(2,:));
 videoPlayer_R = vision.VideoPlayer();
-objectFrame_R = read(videoReader_R, 250);
+objectFrame_R = read(videoReader_R, 350);
 
 videoReader_L = VideoReader(filenames(3,:));
 videoPlayer_L = vision.VideoPlayer();
-objectFrame_L = read(videoReader_L, 250);
+objectFrame_L = read(videoReader_L, 350);
 
 %% Get the facial landmarks to create a coordinate system.
 
@@ -40,7 +40,7 @@ faceTracker_L = vision.PointTracker('MaxBidirectionalError', 1, 'NumPyramidLevel
 faceTracker_R = vision.PointTracker('MaxBidirectionalError', 1, 'NumPyramidLevels', 5);
 faceTracker_M = vision.PointTracker('MaxBidirectionalError', 1, ...
                         'NumPyramidLevels', 2); % Less likely to change position => 
-                                            % lower pyramid levels to save some computation.
+                                            % lower pyramid levels to save some computation.                                            
 
 % Initialize the point trackers
 initialize(faceTracker_L, facePoints_M, objectFrame_M);
@@ -51,14 +51,14 @@ initialize(faceTracker_M, facePoints_M, objectFrame_M);
 [facePoints_L, validIdx_L] = step(faceTracker_L, objectFrame_L);
 [facePoints_R, validIdx_R] = step(faceTracker_R, objectFrame_R);
 % Extract the valid matches.
-facePoints_M = facePoints_M(validIdx_L & validIdx_R, :);
-facePoints_L = facePoints_L(validIdx_L & validIdx_R, :);
-facePoints_R = facePoints_R(validIdx_R & validIdx_L, :);
+facePoints_M = facePoints_M(validIdx_L, :);
+facePoints_L = facePoints_L(validIdx_L, :);
+% facePoints_R = facePoints_R(validIdx_R & validIdx_L, :);
 
 % Get the point indexes for Left Eye, Right Eye, etc. for the Left and Right cameras.
-le_id = (loc(validIdx_L&validIdx_R)=="Left Eye");    
-re_id = (loc(validIdx_L & validIdx_R)=="Right Eye");   
-n_id  = (loc(validIdx_L &validIdx_R)=="Nose");       
+le_id = (loc(validIdx_L)=="Left Eye");    
+re_id = (loc(validIdx_L)=="Right Eye");   
+n_id  = (loc(validIdx_L)=="Nose");       
 
 newFacePts = translate_coords(facePoints_M, facePoints_L, ...
         stereoParamsLM, facePoints_M(le_id,:), facePoints_L(le_id,:),...
@@ -111,9 +111,19 @@ while hasFrame(videoReader_M)
     visiblePoints = points_M(isFound, :);
     oldInliers = oldPoints(isFound, :);
 
-    if size(visiblePoints, 1) <= 10     % Recapture interest points if they drop below 10.
-        objectRegion_M(1:2) = round(median(visiblePoints)) - [27 27];
-        
+    % Recapture interest points if they drop below 10.
+    if size(visiblePoints, 1) <= 10 
+        % If num of points too low, manually re-select rectangle.
+        if size(visiblePoints, 1) <= 1 
+            figure; imshow(frame_M); title('Draw rectangle around tongue tip');
+            objectRegion_M=round(getPosition(imrect));   % User selects the rectangle of interest.
+        else
+            % Get the current motion and assume it will partly continue.
+            shift = median(visiblePoints) - oldCentre;
+            newCentre = median(visiblePoints) + shift/2;  
+            % The new rectangle will have the same size as the old one.
+            objectRegion_M(1:2) = newCentre - objectRegion_M(3:4)/2;
+        end
         points_M = detectMinEigenFeatures(im2gray(frame_M),'ROI',objectRegion_M,...
                                    'MinQuality',0.001);
 
@@ -149,27 +159,34 @@ while hasFrame(videoReader_M)
     [facePts_L, validIdx_L] = step(faceTracker_L, frame_L);
     [facePts_R, validIdx_R] = step(faceTracker_R, frame_R);
     [facePts_M, validIdx_M] = step(faceTracker_M, frame_M);
-    validIdx_face = (validIdx_L & validIdx_M & validIdx_R);
-    % Get the point indexes for Left Eye, Right Eye, etc. for the Left and Right cameras.
-    le_id = (loc(validIdx_face)=="Left Eye");    
-    re_id = (loc(validIdx_face)=="Right Eye");   
-    n_id  = (loc(validIdx_face)=="Nose");   
+    % Get the point indexes for Left Eye, Right Eye, etc. for the Left and Middle cameras.
+    le_id = (loc(validIdx_L & validIdx_M) == "Left Eye");    
+    re_id = (loc(validIdx_L & validIdx_M) == "Right Eye");   
+    n_id  = (loc(validIdx_L & validIdx_M) == "Nose");   
     
-    if sum(validIdx_tongue_L) > 0    
+    % Check that there is at least one point for the tongue and facial landmarks.
+    if min([max(le_id), max(re_id), max(n_id), max(validIdx_tongue_L)]) > 0  
         tongue_pts_L = translate_coords( visiblePoints(validIdx_tongue_L,:), ...
-            points_L(validIdx_tongue_L, :), stereoParamsLM, facePoints_M(le_id,:),...
-            facePoints_L(le_id,:), facePoints_M(re_id,:),facePoints_L(re_id,:), ...
-            facePoints_M(n_id,:), facePoints_L(n_id,:), [0 0 0], false);
+            points_L(validIdx_tongue_L, :), stereoParamsLM, facePts_M(le_id,:),...
+            facePts_L(le_id,:), facePts_M(re_id,:),facePts_L(re_id,:), ...
+            facePts_M(n_id,:), facePts_L(n_id,:), orig_nose, false);
         % Plot the X, Y coordinates of the points.
         scatter(tongue_pts_L(:,1), tongue_pts_L(:,2),16,'blue','filled')      
         saved_pts_L = [saved_pts_L; tongue_pts_L]; % Keep a record of past points.
     end
     
-    if sum(validIdx_tongue_R) > 0
+    % Same procedure as above but for the middle and right cameras.
+    % Get the point indexes for Left Eye, Right Eye, etc. for the Left and Right cameras.
+    le_id = (loc(validIdx_M & validIdx_R) == "Left Eye");    
+    re_id = (loc(validIdx_M & validIdx_R) == "Right Eye");   
+    n_id  = (loc(validIdx_M & validIdx_R) == "Nose");  
+    
+    % Check that there is at least one point for the tongue and facial landmarks.
+    if min([max(le_id), max(re_id), max(n_id), max(validIdx_tongue_R)]) > 0  
         tongue_pts_R = translate_coords( visiblePoints(validIdx_tongue_R,:), ...
-            points_R(validIdx_tongue_R, :), stereoParamsRM, facePoints_M(le_id,:),...
-            facePoints_R(le_id,:), facePoints_M(re_id,:),facePoints_R(re_id,:), ...
-            facePoints_M(n_id,:), facePoints_R(n_id,:), [0 0 0], false);
+            points_R(validIdx_tongue_R, :), stereoParamsRM, facePts_M(le_id,:),...
+            facePts_R(le_id,:), facePts_M(re_id,:),facePts_R(re_id,:), ...
+            facePts_M(n_id,:), facePts_R(n_id,:), orig_nose, true);
         % Plot the X, Y coordinates of the points.
         scatter(tongue_pts_R(:,1), tongue_pts_R(:,2),16,'red','filled')      
         saved_pts_R = [saved_pts_R; tongue_pts_R]; % Keep a record of past points.
@@ -177,6 +194,7 @@ while hasFrame(videoReader_M)
     % Reset the points
     oldPoints = visiblePoints;
     setPoints(tracker_M, oldPoints);  
+    oldCentre = median(visiblePoints);
     % Display the annotated video frame using the video player object
     step(videoPlayer, frame_M);
 end
