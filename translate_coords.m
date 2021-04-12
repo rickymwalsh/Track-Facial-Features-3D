@@ -70,7 +70,7 @@ function [new_pts] = ...
         % Check if it is a different location to the original nose tip. If so,
         % get the rotation matrix and apply it to the detected tongue points.
         if  (norm(new_nose(2:3) - original_nose_tip(2:3))> 0.001)
-            R=RU([0 original_nose_tip(2) original_nose_tip(3)], [0 new_nose(2) new_nose(3)]);
+            R=RU([0 new_nose(2) new_nose(3)], [0 original_nose_tip(2) original_nose_tip(3)]);
             R = R/norm(R);   % Normalise the matrix.
             R(1) = 1;        % Rotation about x-axis => preserve x coordinates.
             new_pts = new_pts * R;          % Apply the same rotation to the new points.
