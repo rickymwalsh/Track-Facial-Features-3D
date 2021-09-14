@@ -42,8 +42,29 @@ figure, imshow(edges_canny, []); title('Canny Edges');
 figure, imshow(edges_mh, []); title('Marr-Hildreth Edges');
 
 % Get the edges using Canny and Marr-Hildreth methods.
-edges_canny = ut_edge(out_left(500:700,600:900), 'c', 's',2,'h', [0.1 0.01]);
-edges_mh = ut_edge(out_left(500:700,600:900), 'm', 's',2,'h', [0.05 0.0175]);
+edges_canny = ut_edge(out_left_grey(500:700,600:900), 'c', 's',2,'h', [0.1 0.01]);
+edges_mh = ut_edge(out_left_grey(500:700,600:900), 'm', 's',2,'h', [0.05 0.0175]);
 
 figure, imshow(edges_canny, []); title('Canny Edges - Left');
 figure, imshow(edges_mh, []); title('Marr-Hildreth Edges - Left');
+
+%% Edge Detector with just the Red Channel
+
+out_left_red = out_left(:,:,1);
+
+% Get the edges using Canny and Marr-Hildreth methods.
+edges_canny = ut_edge(out_left_red(500:700,600:900), 'c', 's',2,'h', [0.1 0.01]);
+edges_mh = ut_edge(out_left_red(500:700,600:900), 'm', 's',2,'h', [0.05 0.0175]);
+
+figure, imshow(edges_canny, []); title('Canny Edges - Left Red');
+figure, imshow(edges_mh, []); title('Marr-Hildreth Edges - Left Red');
+
+%% Edge Detection including colour;
+
+[edge_magnitude, edge_orientation] = coloredges(out_left);
+figure, imshow(edge_magnitude); title('Edges (w/ Colour)');
+
+[edge_magnitude, edge_orientation] = coloredges(out_left(500:700,600:900,:));
+figure, imshow(edge_magnitude); title('Edges (w/ Colour) - Mouth Region');
+
+
